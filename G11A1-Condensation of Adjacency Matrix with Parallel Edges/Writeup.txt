@@ -1,0 +1,245 @@
+========
+ABSTRACT
+========
+
+This paper gives an insight into the various methods that can be applied in condensation of an undirected graph represented as a 2D-matrix (Adjacency Matrix). Adjacency matrix represnetation is very efficient as one can retrieve connectivity information in a constant time O(1) operation. However, if the number of vertices is very large, and the connectivity is sparse, this representation can lead to a lot of space wastage, and also infeasible in terms of memory usage (O(v^2) space compklexity). Thus we need some methods to condense the matrix without losing information (lossless). This paper discusses approaches that can be applied in practical scenarios. The paper considers the case of graphs having parallel/multiple edges between 2 vertices (a case ignored by most algorithms).
+
+==========
+MOTIVATION
+==========
+
+Compression has always been a demanding and debated topic in reasearch groups, as in practical scenarios, we are bound by the availability of memory in any computation task. In a matrix compression involving the representation of a graph, one cannot lose connectivity information, thus allowing us to only perform lossless compression techniques. Performing operations on uncompressed matrix can lead to high memory consumption. Computing with large matrices means we need to access RAM more frequently, as we can't keep much data in the CPU registers. The average latency of a RAM read operation is 150 times that of a CPU register access.
+The paper discusses three variations of bitstring compression, which allows large matrices to be representable by integer values that can be directly moved to a faster cache or CPU registers. Thus, not only matrix compression helps dealing with memory limitation, but it also indirectly handles the case of latency or time consumption.
+
+========================
+METHODOLOGY AND APPROACH
+========================
+
+As said in previous sections, we will delve into 3 variations of bitstring compression techniques, that can be appropriately chosen according to the scenario, and analyze their efficiency and falacies. The approaches discussed here considers the undirected graph as having parallel edges between same pair of vertices. This leads to additional complications as the entries in the adjacency matrix is not just binary. However, the methods discussed here are versatile enough to handle such cases.
+
+NOTE:
+{bullet} All the methods discussed are performed after doing trivial space reduction in case of undirected graphs. In an undirected graph, there is bidirectional connectivity between vertices. 
+						               {math} v->u => u->v {math}
+
+Thus, we store lower vertex information in higher vertex.
+										if (v>u)
+											v[u]=cnt;
+										else
+											u[v]=cnt;
+
+This leads us naturally to avoid storing duplicate information and store connectivity information only once. This leads to storing only upper triangle or lower triangle rather than the whole matrix. This reduces consumed space by 1/2 (a significant reduction).
+
+{bullet} To account for multiple edges between same pair of vertices, we store the count of such vertices as {math} Aij {math}.
+
+Now, let's discuss the methods one by one:-
+
+1) Integer conversion method using appropriate Base.
+----------------------------------------------------
+Supposing we have the connectivity information of vertex 8 as:-
+	
+									{math} 8: {0,2,5}
+
+Instead of storing 3 seperate integers, we can choose an appropriate base and convert it to a single integer to be stored at an array with index 8. In more generic terms, given:-
+
+									{math} v1: {u1,u2,u3,u4,......un}
+
+We can choose a Base 	
+									{math} b=max(u1,u2,u3,....un)+1
+
+and convert {u1,u2,u3,....un} to:-
+									{math} v1: u1+u2*b+u3*b^2+......+un*b^(n-1)    <=== a single integer
+
+
+Thus a matrix like:-
+										0: {}
+										1: {0}
+										2: {1}
+										3: {2,0}
+										4: {3,2,0}
+										5: {2,1}
+
+gets converted to:- 
+										0: NULL
+										1: 0
+										2: 1
+										3: 20
+										4: 320
+										5: 21
+
+Thus the complexity earlier was (considering complete graph): 1+2+3+4+....(n-1) = O(n*(n-1)/2) ~ O(n^2)
+But now converion to each integer is storing same information as a single integer: 1+1+1+.... (n times) = O(n)
+
+Algorithm:-
+		
+		//Choosing appropriate Base
+
+		Base = 0  
+		for i = 1 to N
+			for j=1 to i-1  //Iterate over all matrix elements
+				Base = max (Base, graph[i][j])
+
+
+		//Condensation
+
+		for i = 1 to N
+			val = 0
+			for j = i-1 to 0
+				val = val * Base + graph[i][j]
+
+			condensed[i] = val       // A linear array
+
+
+		//Decondense
+
+		for i = 1 to N
+			val = condensed[i]
+			for j = 1 to i-1
+				decondense[i][j] = val % Base
+				val = val / Base
+
+
+Drawbacks:
+This method may seem lucrative, but has a problem with overflow. Integer (even unsigned long long int in 64-bit architecture) has a limited size (64 bit max in most systems). Thus most computers can at max store 2^64-1.
+
+However, if the Base chosen is large and also the matrix is very dense and large, huge numbers can get generated that can lead to overflow
+
+
+2) Bit-string method (Static Length)
+------------------------------------
+
+In bit string method, we still use 64-bit integers to store information. However, we dont waste space by keeping leading zeros for a small number. That way whole 64-bit gets utilized, and for sparse graphs we can keep edge information for multiple vertices in one single integer.
+We do that by finding out the maximum bit length required to represent all the values stored in the matrix. Let's look at an example:-
+					
+					Edge    Count 	Binary Rep.		#Bits
+					M1,1	900 	1110000100 		10
+					M1,2	1023 	1111111111 		10
+					M1,3	721 	1011010001 		10
+					M1,4	256 	100000000 		9
+					M1,5	1 		1 				1
+					M1,6	10 		1010 			4
+					M1,7	700 	1010111100 		10
+					M1,8	20 		10100 			5
+
+In this case, we would get away with 10 bits (max bit length) for each edge value.
+
+We then divide a 64-bit integer into 10-bit chunks, and store each edge information sequentially:-
+
+	bitstring1 = 0000 0000001010 0000000001 0100000000 1011010001 1111111111 1110000100
+						[10]      [1]          [256]	[721]		[1023]		[900]
+
+Whenever we are unable to accomodate all the edges, we append another 64-bit integer:-
+	
+	bitstring2 = 0000 0000000000 0000000000 0000000000 0000000000 000010100 1010111100
+																	[20]		[700]
+
+We keep track of number of edges found till now and stop accordingly.
+This method works in average case very well, because the whole matrix can be reduced to a list of 64-bit integers.
+
+Algorithm:-
+
+		//find maximum bit length required
+		maxlen = 0 
+		for i=1 to N
+			for j = 1 to i-1
+			maxlen = max (maxlen, length_binary(graph[i][j]))
+
+		//length_binary is an utility function that returns length of binary string. Implementation is trivial
+
+		
+		//create bit string integers and append to list
+		ordered_list = {}
+		offset = 0
+		for i = 1 to N
+			for j = 1 tto i-1
+				val = graph[i][j]
+
+				if (offset + maxlen >= 64)
+					add old integer to list
+					create new integer x
+
+				val = val << offset    //Right shift by offset
+				offset = offset + maxlen
+
+				x = x | val  //logical OR
+
+
+DRAWBACKS:
+For an immensely dense graph, where all matrix values are of order ~ 2^(50-60), almost a single integer is required for all the edges. In such a worst case, space required is more or less same. However, such dense graphs rarely arise, and we can get away with the excellent average case compression rate.
+
+
+3) Bit-string method (Variable Length)
+--------------------------------------
+
+The method is almost similar to the above one however, we can reduce bit-space wastage further by noticing that many small edge values will have leading zeros in case max bit length is large. As in the above example, max bit length was 10, however,to represent 1, we require only 1 bit, rest of the 9 bits account for leading zeros and bit-space wastage. Similar for value 10, we could do with 4 bits only.
+
+In variable length method we keep 2 seperate set of integers:-
+			
+			length-string: stores the number of bits required by Mi,j
+			value-string: stores the value Mi,j
+
+However, in the length string, we need to store each length value in a set of maxbits required to store the lengths. In this case, we have max length value: 10, for which we require 4 bits. Thus we would store length values in intervals of 4.
+
+As an example, we do as:-
+	
+	length-string: 0101 1010 0100 0001 1001 1010 1010 1010
+					5    10    4    1    9   10   10   10
+
+	bit-string: 10100 1010111100 1010 1 100000000 1011010001 1111111111 1110000100
+				  20    700       10  1    256       721       1023         900
+
+Hence, we can see that we accomodated all the edges in a single bit-string, with a tradeoff of keeping a length-string integer. However, this tradeoff is acceptable as the space saved by truncating leading zeros in edge-string is immense.
+
+Algorithm:-
+
+			length-string int L
+			edge-string int E
+
+			offset l = 0  //offset for length-string
+			offset e = 0  //offset for edge-strings
+
+			for i = 1 to N
+				for j = 1 to i-1
+					val = graph[i][j]
+
+					bitlen = length_binary(graph[i][j])
+
+					if (e + bitlen >= 64)
+						append old E to list
+						allocate new E
+
+					if (l + maxbits >= 64)
+						append old L to list
+						allocate new L
+
+					val = val << e
+					E = E | val
+					e = e + bitlen
+
+					bitlen = bitlen << l
+					L = L | bitlen
+					l = l + maxbits
+
+DRAWBACKS:
+It also has the same drawback as it's static counterpart. i.e. for large matrix values, almost a single integer is required for all the edges. In such a worst case, space required is more or less same.
+
+========================
+IMPLEMENTATION & RESULTS
+========================
+
+
+
+
+==========
+CONCLUSION
+==========
+
+
+
+==========
+REFERENCES
+==========
+
+
+
+
+

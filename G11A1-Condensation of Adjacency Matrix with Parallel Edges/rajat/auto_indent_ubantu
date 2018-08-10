@@ -1,0 +1,6 @@
+auto indent in ubantu
+
+vi .vimrc enter it will open empty file
+go in insert mode
+type:
+set smartindent
